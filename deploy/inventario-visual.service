@@ -1,0 +1,23 @@
+# Serviço systemd do inventario-visual.
+# Ajuste User=, WorkingDirectory= e ExecStart= para o seu usuário e pasta,
+# depois copie para /etc/systemd/system/ (veja o README, seção 3.3).
+
+[Unit]
+Description=inventario-visual (recebe vídeo do celular e salva frames-chave)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=SEU_USUARIO
+# Pasta do projeto: o .env, certs/ e data/ são lidos relativos a ela.
+WorkingDirectory=/home/SEU_USUARIO/inventario-visual
+# Executável criado pelo `uv sync` (ou `pip install -e .`) dentro do .venv.
+ExecStart=/home/SEU_USUARIO/inventario-visual/.venv/bin/inventario-visual
+Restart=on-failure
+RestartSec=3
+# Logs sem buffer, para aparecerem na hora no journalctl.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

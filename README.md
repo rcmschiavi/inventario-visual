@@ -7,7 +7,7 @@ ficam em disco para o processamento posterior (YOLO-World + modelo de
 visão-linguagem), que se conecta por uma interface plugável.
 
 ```
- Celular (Chrome/Safari)                       PC com Windows (este projeto)
+ Celular (Chrome/Safari)                       PC com Linux (este projeto)
 ┌──────────────────────┐   HTTPS (página+SDP)  ┌──────────────────────────────────────────┐
 │ getUserMedia         │ ───────────────────▶  │ FastAPI  ── /api/offer ──▶ aiortc         │
 │ (câmera traseira)    │                       │                              │            │
@@ -31,6 +31,8 @@ inventario-visual/
 ├── .env.example                 # todos os parâmetros configuráveis
 ├── scripts/
 │   └── gerar_certificado.py     # mkcert, com fallback para CA própria
+├── deploy/
+│   └── inventario-visual.service  # modelo de serviço systemd
 ├── src/inventario_visual/
 │   ├── __main__.py              # `inventario-visual` (sobe o servidor HTTPS)
 │   ├── app.py                   # rotas FastAPI
@@ -46,64 +48,74 @@ inventario-visual/
 
 ---
 
-## 1. Instalação no Windows (com GPU NVIDIA)
+## 1. Instalação no Linux (com GPU NVIDIA)
 
-> O **streaming e o seletor de frames rodam na CPU** e funcionam em qualquer PC.
-> A GPU NVIDIA só será usada pela etapa de visão (YOLO-World + VLM), que será
-> plugada depois. Mesmo assim, já deixamos o ambiente pronto para ela.
+> Os comandos abaixo são para **Ubuntu/Debian**; em outras distribuições, troque
+> o `apt` pelo gerenciador de pacotes equivalente.
+>
+> O **streaming e o seletor de frames rodam na CPU** e funcionam em qualquer
+> máquina. A GPU NVIDIA só será usada pela etapa de visão (YOLO-World + VLM),
+> que será plugada depois. Mesmo assim, já deixamos o ambiente pronto para ela.
+> Uma máquina sem monitor (servidor headless) funciona normalmente.
 
 ### 1.1 Pré-requisitos
 
-1. **Python 3.11+** — <https://www.python.org/downloads/> (marque *Add python.exe to PATH*).
-2. **uv** (recomendado) — no PowerShell:
-   ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+1. **uv** (recomendado; ele mesmo baixa o Python 3.11+ se o do sistema for antigo):
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
-3. **Driver NVIDIA** atualizado. Confira com:
-   ```powershell
+2. **Driver NVIDIA**. Confira com:
+   ```bash
    nvidia-smi
    ```
-   A coluna *CUDA Version* mostra a versão máxima de CUDA suportada pelo driver.
-4. **mkcert** (opcional, mas recomendado):
-   ```powershell
-   winget install FiloSottile.mkcert
+   Se o comando não existir, instale o driver recomendado e reinicie:
+   ```bash
+   sudo ubuntu-drivers install && sudo reboot
    ```
-   (ou `choco install mkcert` / `scoop install mkcert`). Sem o mkcert, o script
-   gera uma CA própria usando a biblioteca `cryptography`.
+   Não é preciso instalar o CUDA Toolkit: o PyTorch já traz as bibliotecas CUDA,
+   só o driver é necessário.
+3. **mkcert** (opcional, mas recomendado):
+   ```bash
+   sudo apt install mkcert libnss3-tools
+   ```
+   Sem o mkcert, o script gera uma CA própria usando a biblioteca `cryptography`.
 
 ### 1.2 Dependências do projeto
 
 Com **uv**:
 
-```powershell
+```bash
+git clone https://github.com/rcmschiavi/inventario-visual.git
 cd inventario-visual
 uv sync            # cria .venv e instala tudo (inclui pytest/mypy do grupo dev)
 ```
 
 Ou com **pip**:
 
-```powershell
+```bash
+sudo apt install python3-venv     # Python 3.11+ (Ubuntu 24.04 / Debian 12 já têm)
 cd inventario-visual
-python -m venv .venv
-.venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements-dev.txt
 pip install -e .
 ```
 
-> O `aiortc` e o `av` (PyAV) têm wheels prontos para Windows; não é preciso
-> compilar nada nem instalar o FFmpeg separadamente.
+> O `aiortc`, o `av` (PyAV) e o `opencv-python-headless` têm wheels prontos para
+> Linux: não é preciso compilar nada, nem instalar FFmpeg ou bibliotecas gráficas.
 
 ### 1.3 (Para a etapa de visão) PyTorch com CUDA
 
 Ainda não é necessário para o streaming, mas quando for plugar o YOLO-World:
 
-```powershell
-# Escolha o índice compatível com seu driver em https://pytorch.org/get-started/locally/
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```bash
+uv add torch torchvision      # no Linux, o pacote do PyPI já vem com CUDA
 uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Deve imprimir `True` e o nome da sua placa.
+Deve imprimir `True` e o nome da sua placa. Use `uv add` (e não `uv pip install`)
+para o pacote ficar registrado no `pyproject.toml`; senão o próximo `uv sync`
+o remove.
 
 ---
 
@@ -116,7 +128,7 @@ esse IP.
 
 ### 2.1 Gerar o certificado
 
-```powershell
+```bash
 uv run python scripts/gerar_certificado.py
 ```
 
@@ -135,7 +147,7 @@ O script detecta os IPs do PC e gera em `certs/`:
   roteador (reserva DHCP).
 - Para forçar o fallback mesmo com mkcert instalado: `--sem-mkcert`.
 
-Descubra o IP do PC com `ipconfig` (campo *Endereço IPv4* do adaptador Wi-Fi/Ethernet).
+Descubra o IP do PC com `hostname -I` ou `ip -4 addr` (interface Wi-Fi/Ethernet, ex.: `192.168.0.50`).
 
 ### 2.2 Instalar a CA no Android
 
@@ -181,7 +193,7 @@ precisar mais.
 
 ## 3. Rodando o servidor
 
-```powershell
+```bash
 uv run inventario-visual
 #   ou:  uv run python -m inventario_visual --port 8443
 ```
@@ -192,26 +204,27 @@ O terminal mostra o endereço a abrir no celular, por exemplo:
   Abra no celular:  https://192.168.0.50:8443/
 ```
 
-### 3.1 Firewall do Windows
+### 3.1 Firewall
 
 O celular precisa alcançar o PC em **TCP 8443** (página) e em **portas UDP
-dinâmicas** (mídia WebRTC).
+dinâmicas** (mídia WebRTC; o aiortc escolhe portas aleatórias). Se o firewall
+estiver desligado (padrão no Ubuntu desktop), não há nada a fazer. Confira com
+`sudo ufw status`.
 
-- Garanta que a rede Wi-Fi esteja como **Rede privada**
-  (*Configurações → Rede e Internet → Wi-Fi → propriedades*).
-- Na primeira execução o Windows pergunta se o **Python** pode se comunicar em
-  redes privadas: clique em **Permitir**.
-- Se não apareceu a pergunta ou o vídeo não conecta, crie as regras manualmente
-  (PowerShell **como administrador**, dentro da pasta do projeto):
-  ```powershell
-  New-NetFirewallRule -DisplayName "inventario-visual HTTPS" -Direction Inbound `
-      -Protocol TCP -LocalPort 8443 -Action Allow -Profile Private
-  $py = uv run python -c "import sys; print(sys._base_executable)"
-  New-NetFirewallRule -DisplayName "inventario-visual WebRTC" -Direction Inbound `
-      -Program $py -Protocol UDP -Action Allow -Profile Private
-  ```
-  (A regra UDP é por programa porque o WebRTC usa portas aleatórias. Usamos o
-  executável *base* do Python porque o `python.exe` do `.venv` é só um lançador.)
+Com **ufw** (Ubuntu), troque `192.168.0.0/24` pela faixa da sua rede:
+
+```bash
+sudo ufw allow 8443/tcp
+sudo ufw allow from 192.168.0.0/24 proto udp   # mídia WebRTC, só da rede local
+```
+
+Com **firewalld** (Fedora, RHEL…):
+
+```bash
+sudo firewall-cmd --permanent --add-port=8443/tcp
+sudo firewall-cmd --permanent --zone=trusted --add-source=192.168.0.0/24
+sudo firewall-cmd --reload
+```
 
 ### 3.2 No celular
 
@@ -226,7 +239,22 @@ dinâmicas** (mídia WebRTC).
    canto aumenta. A barra inferior mostra o que o seletor está vendo:
    *Em movimento*, *Estabilizando*, *Desfocado*, *Cena já capturada*…
 
-### 3.3 Onde ficam os frames
+### 3.3 Rodar como serviço (systemd)
+
+Para o servidor subir sozinho com a máquina, use o modelo em
+`deploy/inventario-visual.service`:
+
+```bash
+# ajuste User= e os caminhos no arquivo antes de copiar
+sudo cp deploy/inventario-visual.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now inventario-visual
+journalctl -u inventario-visual -f        # acompanhar os logs
+```
+
+O serviço lê o `.env` da pasta do projeto, como na execução manual.
+
+### 3.4 Onde ficam os frames
 
 ```
 data/keyframes/
@@ -289,7 +317,7 @@ prefixo `INVENTARIO_`:
 Os valores de nitidez dependem muito da cena e da câmera. Grave um vídeo
 curto com o celular passando pelos itens e rode:
 
-```powershell
+```bash
 uv run inventario-offline meu_video.mp4 -v --saida data/calibracao
 ```
 
@@ -346,7 +374,7 @@ descartados (continuam salvos em disco para reprocessar depois).
 
 ## 6. Testes
 
-```powershell
+```bash
 uv run pytest
 uv run mypy src        # checagem de tipos (modo estrito)
 ```
@@ -367,9 +395,27 @@ pipeline de processadores, a gravação com timestamp, as rotas HTTP e um teste
 |---|---|
 | "Câmera indisponível: abra a página via HTTPS" | Página aberta em `http://`. Use `https://IP:8443`. |
 | Aviso de certificado mesmo após instalar a CA | iPhone: falta ativar a *confiança total* (2.3, passo 3). IP mudou: rode o script de novo. |
-| Página abre, mas fica em "Conectando…" / "Falha na conexão WebRTC" | Firewall bloqueando UDP do Python (3.1); rede de convidados/isolamento de AP; VPN ativa no PC ou no celular. |
+| Página abre, mas fica em "Conectando…" / "Falha na conexão WebRTC" | Firewall bloqueando UDP (3.1); rede de convidados/isolamento de AP; VPN ativa no PC ou no celular. |
 | Página nem abre no celular | Celular em outra rede (ou dados móveis); porta 8443 bloqueada no firewall; IP errado. |
 | Abre a câmera frontal | Alguns aparelhos ignoram `facingMode`; feche outras apps de câmera e recarregue. |
 | Nenhum frame salvo | Veja `nitidez=` na barra inferior e reduza `SHARPNESS_THRESHOLD`; ou aumente `MOTION_THRESHOLD`. |
 | Muitos frames repetidos | Aumente `NOVELTY_THRESHOLD` e/ou `MIN_KEYFRAME_INTERVAL_S`. |
 | Imagem com resolução baixa | O navegador reduz a resolução quando a rede está ruim; aproxime-se do roteador (5 GHz ajuda). |
+
+---
+
+## Apêndice: rodando no Windows
+
+O código é o mesmo. Diferenças:
+
+- Instale o uv com `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+  e o mkcert com `winget install FiloSottile.mkcert`.
+- Deixe a rede Wi-Fi como **Rede privada** e, na primeira execução, permita o
+  Python no firewall. Se a pergunta não aparecer, no PowerShell como administrador:
+  ```powershell
+  New-NetFirewallRule -DisplayName "inventario-visual HTTPS" -Direction Inbound `
+      -Protocol TCP -LocalPort 8443 -Action Allow -Profile Private
+  $py = uv run python -c "import sys; print(sys._base_executable)"
+  New-NetFirewallRule -DisplayName "inventario-visual WebRTC" -Direction Inbound `
+      -Program $py -Protocol UDP -Action Allow -Profile Private
+  ```
