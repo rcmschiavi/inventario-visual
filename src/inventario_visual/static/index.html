@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <title>Inventário Visual</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <div id="video-wrap">
+      <!-- playsinline + muted são obrigatórios para o autoplay no iPhone -->
+      <video id="preview" autoplay playsinline muted></video>
+      <div id="flash"></div>
+      <div id="badge" class="hidden">0</div>
+    </div>
+
+    <section id="painel">
+      <div id="estado">Desconectado</div>
+      <div id="metricas">—</div>
+      <div class="botoes">
+        <button id="btn-iniciar" type="button">Iniciar câmera</button>
+        <button id="btn-parar" type="button" disabled>Parar</button>
+      </div>
+      <details>
+        <summary>Ajuda</summary>
+        <p>Aponte a câmera para os itens e <b>segure parado por ~1 segundo</b>.
+           Quando a imagem estiver estável e nítida, o servidor salva um
+           frame-chave (a tela pisca e o contador aumenta).</p>
+        <p>Se a câmera não abrir, verifique se a página está em <b>https://</b>
+           e se o certificado foi instalado (veja o README).
+           <a href="/ca.crt">Baixar certificado da CA</a>.</p>
+      </details>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

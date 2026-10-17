@@ -1,0 +1,8 @@
+# Alternativa ao uv: pip install -r requirements.txt  (e depois: pip install -e .)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+aiortc>=1.9
+opencv-python-headless>=4.9
+numpy>=1.26
+pydantic-settings>=2.4
+cryptography>=42
