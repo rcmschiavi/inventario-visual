@@ -18,7 +18,7 @@ import contextlib
 import importlib
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +44,13 @@ class Keyframe:
     # Espaço livre para processadores anteriores deixarem resultados
     # para os seguintes (ex.: detecções do YOLO usadas pelo VLM).
     extras: dict[str, Any] = field(default_factory=dict)
+    # Envia um evento JSON ao celular que gerou o frame (seguro para chamar da
+    # thread de trabalho). None quando não há celular conectado (ex.: offline).
+    notify: Callable[[dict[str, Any]], None] | None = None
+
+    def send_event(self, payload: dict[str, Any]) -> None:
+        if self.notify is not None:
+            self.notify(payload)
 
 
 class FrameProcessor(ABC):

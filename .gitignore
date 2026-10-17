@@ -8,3 +8,4 @@ certs/*
 data/*
 !data/.gitkeep
 .env
+models/

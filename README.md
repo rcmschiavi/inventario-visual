@@ -19,7 +19,7 @@ visão-linguagem), que se conecta por uma interface plugável.
                                                │          │                                │
                                                │          ▼                                │
                                                │  ProcessorPipeline ▶ FrameProcessor(s)    │
-                                               │  (LogProcessor hoje; YOLO-World/VLM depois)│
+                                               │  (LogProcessor, YOLO-World; VLM depois)    │
                                                └──────────────────────────────────────────┘
 ```
 
@@ -29,6 +29,8 @@ visão-linguagem), que se conecta por uma interface plugável.
 inventario-visual/
 ├── pyproject.toml / requirements*.txt
 ├── .env.example                 # todos os parâmetros configuráveis
+├── config/
+│   └── classes.txt              # o que o YOLO-World deve procurar
 ├── scripts/
 │   └── gerar_certificado.py     # mkcert, com fallback para CA própria
 ├── deploy/
@@ -40,7 +42,8 @@ inventario-visual/
 │   ├── keyframes.py             # seletor de frames-chave (puro, sem WebRTC)
 │   ├── storage.py               # gravação JPEG + metadados JSONL
 │   ├── processors.py            # FrameProcessor (ABC) e pipeline assíncrono
-│   ├── offline.py               # `inventario-offline`: roda o seletor em um vídeo
+│   ├── vision/                  # YOLO-World: vocabulário, detector e processador
+│   ├── offline.py               # `inventario-offline`: seletor (+ processadores) em um vídeo
 │   ├── config.py                # Settings (variáveis INVENTARIO_*)
 │   └── static/                  # index.html, app.js, style.css (JS puro)
 └── tests/                       # pytest com imagens e vídeos sintéticos
@@ -328,40 +331,140 @@ valores para o `.env`. A barra inferior da página no celular também mostra
 
 ---
 
-## 5. Plugando a etapa de visão (YOLO-World + VLM)
+## 5. Detecção de objetos (YOLO-World)
 
-O streaming não conhece a visão. Ele só entrega cada frame-chave a uma lista de
-`FrameProcessor`, que roda numa **thread de trabalho separada** (pode bloquear
-e usar a GPU sem travar o vídeo), em ordem, com fila limitada.
+Cada frame-chave pode passar pelo **YOLO-World**, um detector de *vocabulário
+aberto*: em vez de um conjunto fixo de classes, você escreve a lista de objetos
+que quer encontrar. Para cada frame ele marca onde está cada objeto, conta
+quantos há de cada tipo e recorta cada um (os recortes serão a entrada do
+modelo de visão-linguagem, na próxima etapa).
+
+### 5.1 Instalar
+
+```bash
+uv sync --extra visao      # ultralytics + PyTorch (com CUDA) + CLIP; ~3 GB
+#   ou:  pip install -r requirements-visao.txt
+```
+
+Na primeira execução são baixados automaticamente:
+- os pesos do modelo (`models/yolov8l-worldv2.pt`, ~90 MB);
+- o CLIP (`~/.cache/clip`, ~340 MB), usado para entender os nomes das classes.
+
+### 5.2 Ativar
+
+No `.env`:
+
+```
+INVENTARIO_PROCESSORS=inventario_visual.processors:LogProcessor,inventario_visual.vision:YoloWorldProcessor
+```
+
+Ao subir o servidor, o modelo é carregado na GPU antes de aceitar frames
+(aparece `YOLO-World carregado (..., dispositivo=cuda:0)` no log). Sem GPU ele
+roda na CPU, mais devagar; os frames-chave enfileiram, mas o vídeo não trava.
+
+### 5.3 Escolher o que detectar: `config/classes.txt`
+
+```
+# rótulo no catálogo: prompt em inglês[, outro prompt]
+monitor: computer monitor
+cadeira: chair, office chair
+furadeira: power drill, cordless drill
+```
+
+- O **rótulo** (antes do `:`) é o que aparece nos resultados, em português.
+- Os **prompts** (depois do `:`) vão para o modelo. Use **inglês** e termos
+  concretos e visuais: o modelo entende inglês bem melhor.
+- Vários prompts por rótulo ajudam; todos viram o mesmo rótulo na saída.
+- Uma lista **enxuta** com só o que você quer catalogar dá menos confusão.
+- O arquivo inicial tem ~45 itens de escritório, casa e oficina; edite-o à
+  vontade e reinicie o servidor.
+
+### 5.4 O que é gerado
+
+```
+data/keyframes/<sessão>/
+  20261017_173012_481233_0001.jpg
+  detections.jsonl                              # uma linha por frame-chave
+  crops/20261017_173012_481233_0001_01_monitor.jpg
+  crops/20261017_173012_481233_0001_02_cadeira.jpg
+  annotated/20261017_173012_481233_0001.jpg     # frame com as caixas desenhadas
+```
+
+```json
+{"index": 1, "file": "20261017_173012_481233_0001.jpg", "captured_at": "...",
+ "counts": {"cadeira": 2, "monitor": 1},
+ "detections": [{"label": "monitor", "prompt": "computer monitor", "confidence": 0.81,
+                 "bbox": [10, 20, 210, 170], "crop_file": "crops/..._01_monitor.jpg"}, ...]}
+```
+
+No celular, abaixo das métricas, aparece o resumo de cada frame-chave
+(ex.: `#3: 2× cadeira, 1× monitor`).
+
+### 5.5 Parâmetros (`INVENTARIO_YOLO_*`)
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `MODEL` | `yolov8l-worldv2.pt` | `s` / `m` / `l` / `x`: maior = mais preciso e mais lento |
+| `MODELS_DIR` | `models` | onde os pesos são guardados |
+| `CLASSES_FILE` | `config/classes.txt` | vazio = 80 classes padrão do COCO, em inglês |
+| `DEVICE` | `auto` | `auto` (GPU se houver), `cpu`, `cuda:0` |
+| `CONF` | `0.15` | confiança mínima; ↑ menos falsos positivos, ↓ detecta mais |
+| `IOU` | `0.5` | sobreposição para fundir caixas duplicadas |
+| `IMGSZ` | `640` | resolução da inferência; `1280` ajuda com objetos pequenos |
+| `HALF` | `true` | FP16 na GPU (mais rápido, mesma qualidade na prática) |
+| `AGNOSTIC_NMS` | `true` | funde caixas sobrepostas mesmo de rótulos diferentes |
+| `SAVE_CROPS` / `SAVE_ANNOTATED` | `true` | grava recortes / imagem anotada |
+
+### 5.6 Testar sem celular
+
+Grave um vídeo do ambiente e rode a mesma cadeia (seletor + detecção):
+
+```bash
+uv run inventario-offline video.mp4 --processar
+# resultados em data/offline/video/  (abra annotated/ para conferir)
+```
+
+Use isso para ajustar a lista de classes e o `CONF` antes de ir a campo.
+
+### 5.7 Limitações conhecidas
+
+- **Contagem por frame, não por item único:** o mesmo objeto visto em dois
+  frames-chave é contado duas vezes. Juntar as detecções num inventário sem
+  duplicatas é uma etapa futura.
+- Não distingue **marca/modelo** nem lê texto: isso fica para o modelo de
+  visão-linguagem.
+- Objetos pequenos, distantes, transparentes ou parcialmente escondidos têm
+  confiança menor; aproxime a câmera ou aumente `IMGSZ`.
+
+### 5.8 Criando outros processadores
+
+O streaming não conhece a visão: ele só entrega cada frame-chave a uma lista de
+`FrameProcessor`, que roda numa **thread de trabalho separada**, em ordem, com
+fila limitada. Os processadores rodam na ordem de `INVENTARIO_PROCESSORS`, e
+cada um enxerga o que os anteriores deixaram em `keyframe.extras`. Por exemplo,
+as detecções do YOLO-World ficam em `keyframe.extras["detections"]`.
 
 ```python
-# meu_pacote/visao.py
+# meu_pacote/descricao.py
 from inventario_visual import FrameProcessor, Keyframe
 
 
-class YoloWorldVlm(FrameProcessor):
-    name = "yolo-world+vlm"
+class DescreveItens(FrameProcessor):
+    name = "vlm"
 
     def setup(self) -> None:
-        # Chamado uma vez, antes do primeiro frame: carregue os modelos na GPU aqui.
-        from ultralytics import YOLOWorld
-        self.det = YOLOWorld("yolov8l-worldv2.pt").to("cuda")
-        self.det.set_classes(["caixa", "garrafa", "ferramenta"])
+        ...  # carregue o modelo aqui (chamado uma vez)
 
     def process(self, keyframe: Keyframe) -> None:
-        resultado = self.det.predict(keyframe.image, verbose=False)[0]
-        keyframe.extras["deteccoes"] = resultado  # visível para processadores seguintes
-        # ... recortes -> modelo de visão-linguagem -> gravar inventário ...
-
-    def close(self) -> None:
-        ...
+        for det in keyframe.extras.get("detections", []):
+            x1, y1, x2, y2 = det.bbox
+            recorte = keyframe.image[y1:y2, x1:x2]
+            ...  # descrever o recorte
+        keyframe.send_event({"type": "info", "texto": "..."})  # opcional: avisa o celular
 ```
 
-Ative pelo `.env`, sem tocar no código do servidor (vários separados por vírgula,
-executados na ordem):
-
 ```
-INVENTARIO_PROCESSORS=inventario_visual.processors:LogProcessor,meu_pacote.visao:YoloWorldVlm
+INVENTARIO_PROCESSORS=inventario_visual.vision:YoloWorldProcessor,meu_pacote.descricao:DescreveItens
 ```
 
 O `Keyframe` traz: `session_id`, `index`, `captured_at`, `image` (BGR, numpy),
@@ -387,6 +490,10 @@ duplicatas, intervalo mínimo, amostragem, vídeo MJPG gravado em disco, o
 pipeline de processadores, a gravação com timestamp, as rotas HTTP e um teste
 **ponta a ponta com WebRTC real** (cliente aiortc enviando vídeo ao servidor).
 
+Os testes do YOLO-World usam um detector falso, então rodam sem PyTorch. Com o
+extra `visao` instalado, um teste adicional roda o modelo real (`yolov8s`) na
+imagem de exemplo do ultralytics; para rodar só ele: `uv run pytest -m visao`.
+
 ---
 
 ## 7. Solução de problemas
@@ -400,6 +507,10 @@ pipeline de processadores, a gravação com timestamp, as rotas HTTP e um teste
 | Abre a câmera frontal | Alguns aparelhos ignoram `facingMode`; feche outras apps de câmera e recarregue. |
 | Nenhum frame salvo | Veja `nitidez=` na barra inferior e reduza `SHARPNESS_THRESHOLD`; ou aumente `MOTION_THRESHOLD`. |
 | Muitos frames repetidos | Aumente `NOVELTY_THRESHOLD` e/ou `MIN_KEYFRAME_INTERVAL_S`. |
+| `Pacote 'ultralytics' não instalado` | Rode `uv sync --extra visao`. |
+| Log mostra `dispositivo=cpu` tendo GPU | Confira `nvidia-smi` e `uv run python -c "import torch; print(torch.cuda.is_available())"`. |
+| Detecta objetos errados / demais | Aumente `INVENTARIO_YOLO_CONF`, enxugue `config/classes.txt`, use prompts mais específicos. |
+| Não detecta objetos pequenos | Aproxime a câmera ou use `INVENTARIO_YOLO_IMGSZ=1280`. |
 | Imagem com resolução baixa | O navegador reduz a resolução quando a rede está ruim; aproxime-se do roteador (5 GHz ajuda). |
 
 ---

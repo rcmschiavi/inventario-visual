@@ -5,6 +5,7 @@
 const video = document.getElementById("preview");
 const estado = document.getElementById("estado");
 const metricas = document.getElementById("metricas");
+const deteccoes = document.getElementById("deteccoes");
 const badge = document.getElementById("badge");
 const flash = document.getElementById("flash");
 const btnIniciar = document.getElementById("btn-iniciar");
@@ -131,6 +132,11 @@ function tratarEvento(msg) {
   if (msg.type === "keyframe") {
     badge.textContent = String(msg.index);
     piscar();
+  } else if (msg.type === "detections") {
+    // Resultado do YOLO-World para o frame-chave (chega logo após o "keyframe").
+    const itens = Object.entries(msg.counts).map(([rotulo, n]) => `${n}× ${rotulo}`);
+    deteccoes.textContent = `#${msg.index}: ` + (itens.length ? itens.join(", ") : "nada detectado");
+    deteccoes.classList.remove("hidden");
   } else if (msg.type === "status") {
     setEstado(DECISOES[msg.decision] || msg.decision, `estado-${msg.decision}`);
     const nit = msg.sharpness == null ? "-" : msg.sharpness.toFixed(0);

@@ -14,6 +14,15 @@ dependencies = [
     "cryptography>=42",
 ]
 
+[project.optional-dependencies]
+# Etapa de visão (YOLO-World). Instale com:  uv sync --extra visao
+visao = [
+    "ultralytics>=8.3",
+    # CLIP usado pelo YOLO-World para codificar os nomes das classes. Declarado
+    # aqui para o ultralytics não tentar instalá-lo sozinho na primeira execução.
+    "clip @ git+https://github.com/ultralytics/CLIP.git",
+]
+
 [project.scripts]
 inventario-visual = "inventario_visual.__main__:main"
 inventario-offline = "inventario_visual.offline:main"
@@ -29,12 +38,16 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/inventario_visual"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["visao: testes que usam o YOLO-World real (precisam do extra 'visao')"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -14,6 +14,7 @@ import json
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -145,8 +146,19 @@ class CameraSession:
                 sharpness=km.sharpness,
                 motion=km.motion,
                 novelty=result.novelty,
+                notify=self._threadsafe_notifier(),
             )
         )
+
+    def _threadsafe_notifier(self) -> Callable[[dict[str, Any]], None]:
+        """Permite que processadores (em outra thread) enviem eventos ao celular."""
+        loop = asyncio.get_running_loop()
+
+        def notify(payload: dict[str, Any]) -> None:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(self.send_event, payload)
+
+        return notify
 
     async def close(self) -> None:
         if self.task is not None:

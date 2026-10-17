@@ -1,0 +1,62 @@
+# Vocabulário do YOLO-World.
+#
+# Formato:   rótulo no catálogo: prompt em inglês[, outro prompt, ...]
+#            (sem ":" o próprio rótulo é usado como prompt)
+#
+# - Os prompts vão para o modelo; prefira inglês, termos concretos e visuais.
+# - Vários prompts para o mesmo rótulo aumentam a chance de detecção.
+# - Listas menores tendem a dar menos confusão entre classes: deixe só o que
+#   você realmente quer catalogar.
+# - Depois de editar, reinicie o servidor.
+
+# Informática
+notebook: laptop
+monitor: computer monitor
+computador: desktop computer, computer tower
+teclado: keyboard
+mouse: computer mouse
+impressora: printer
+roteador: wifi router
+celular: cell phone
+tablet: tablet computer
+fone de ouvido: headphones
+cabo: cable
+carregador: power adapter
+
+# Mobiliário
+cadeira: chair, office chair
+mesa: desk, table
+armário: cabinet, cupboard
+estante: bookshelf, shelf
+gaveteiro: drawer unit
+
+# Eletrodomésticos e eletrônicos
+televisão: television
+ventilador: electric fan
+ar-condicionado: air conditioner
+geladeira: refrigerator
+micro-ondas: microwave oven
+cafeteira: coffee maker
+projetor: projector
+caixa de som: speaker
+
+# Ferramentas
+furadeira: power drill, cordless drill
+parafusadeira: electric screwdriver
+serra: saw, circular saw
+martelo: hammer
+chave de fenda: screwdriver
+alicate: pliers
+chave inglesa: wrench
+trena: tape measure
+caixa de ferramentas: toolbox
+escada: ladder
+extensão elétrica: power strip, extension cord
+
+# Embalagens e diversos
+caixa: cardboard box, box
+garrafa: bottle
+livro: book
+pasta: binder, folder
+lixeira: trash can
+extintor: fire extinguisher

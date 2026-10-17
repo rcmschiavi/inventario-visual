@@ -39,6 +39,8 @@ class Sinal(FrameProcessor):
 
     def process(self, keyframe: Keyframe) -> None:
         self.recebidos.append(keyframe)
+        # Roda na thread de trabalho: testa o envio de eventos ao celular.
+        keyframe.send_event({"type": "detections", "index": keyframe.index, "counts": {}})
 
 
 def test_streaming_ponta_a_ponta(tmp_path: Path):
@@ -76,3 +78,4 @@ def test_streaming_ponta_a_ponta(tmp_path: Path):
     assert kf.image.shape == (480, 640, 3)
     assert kf.path is not None and kf.path.is_file()
     assert any(e.get("type") == "keyframe" for e in eventos)
+    assert any(e.get("type") == "detections" for e in eventos)
