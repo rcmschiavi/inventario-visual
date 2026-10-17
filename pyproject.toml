@@ -22,10 +22,18 @@ visao = [
     # aqui para o ultralytics não tentar instalá-lo sozinho na primeira execução.
     "clip @ git+https://github.com/ultralytics/CLIP.git",
 ]
+# Descrição dos itens com modelo de visão-linguagem. Instale com:  uv sync --extra visao --extra vlm
+vlm = [
+    "transformers>=4.57",  # Qwen3-VL
+    "accelerate>=1.0",
+    "bitsandbytes>=0.45; sys_platform == 'linux' or sys_platform == 'win32'",  # quantização 4/8 bits
+    "pillow>=10",
+]
 
 [project.scripts]
 inventario-visual = "inventario_visual.__main__:main"
 inventario-offline = "inventario_visual.offline:main"
+inventario-descrever = "inventario_visual.vision.vlm:main"
 
 [dependency-groups]
 dev = [

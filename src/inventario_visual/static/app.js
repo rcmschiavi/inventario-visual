@@ -6,6 +6,7 @@ const video = document.getElementById("preview");
 const estado = document.getElementById("estado");
 const metricas = document.getElementById("metricas");
 const deteccoes = document.getElementById("deteccoes");
+const descricoes = document.getElementById("descricoes");
 const badge = document.getElementById("badge");
 const flash = document.getElementById("flash");
 const btnIniciar = document.getElementById("btn-iniciar");
@@ -137,6 +138,10 @@ function tratarEvento(msg) {
     const itens = Object.entries(msg.counts).map(([rotulo, n]) => `${n}× ${rotulo}`);
     deteccoes.textContent = `#${msg.index}: ` + (itens.length ? itens.join(", ") : "nada detectado");
     deteccoes.classList.remove("hidden");
+  } else if (msg.type === "descriptions") {
+    // Fichas do modelo de visão-linguagem (chegam alguns segundos depois).
+    descricoes.textContent = `#${msg.index}: ` + msg.itens.join("; ");
+    descricoes.classList.remove("hidden");
   } else if (msg.type === "status") {
     setEstado(DECISOES[msg.decision] || msg.decision, `estado-${msg.decision}`);
     const nit = msg.sharpness == null ? "-" : msg.sharpness.toFixed(0);

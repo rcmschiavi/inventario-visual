@@ -4,7 +4,10 @@ Servidor local que recebe **vídeo ao vivo da câmera do celular** (pelo navegad
 sem app nativo) via **WebRTC** e salva automaticamente **frames-chave**, ou seja,
 os momentos em que a câmera está parada e a imagem está nítida. Esses frames
 ficam em disco para o processamento posterior (YOLO-World + modelo de
-visão-linguagem), que se conecta por uma interface plugável.
+visão-linguagem), que se conecta por uma interface plugável: o YOLO-World
+encontra e conta os objetos, e um modelo de visão-linguagem (Qwen3-VL) preenche
+uma ficha para cada um (nome, marca, modelo, estado, texto visível), gerando um
+`inventario.csv`.
 
 ```
  Celular (Chrome/Safari)                       PC com Linux (este projeto)
@@ -19,7 +22,7 @@ visão-linguagem), que se conecta por uma interface plugável.
                                                │          │                                │
                                                │          ▼                                │
                                                │  ProcessorPipeline ▶ FrameProcessor(s)    │
-                                               │  (LogProcessor, YOLO-World; VLM depois)    │
+                                               │  (YOLO-World -> VLM -> inventario.csv)    │
                                                └──────────────────────────────────────────┘
 ```
 
@@ -42,7 +45,7 @@ inventario-visual/
 │   ├── keyframes.py             # seletor de frames-chave (puro, sem WebRTC)
 │   ├── storage.py               # gravação JPEG + metadados JSONL
 │   ├── processors.py            # FrameProcessor (ABC) e pipeline assíncrono
-│   ├── vision/                  # YOLO-World: vocabulário, detector e processador
+│   ├── vision/                  # YOLO-World (detecção) e VLM (descrição dos itens)
 │   ├── offline.py               # `inventario-offline`: seletor (+ processadores) em um vídeo
 │   ├── config.py                # Settings (variáveis INVENTARIO_*)
 │   └── static/                  # index.html, app.js, style.css (JS puro)
@@ -475,7 +478,123 @@ descartados (continuam salvos em disco para reprocessar depois).
 
 ---
 
-## 6. Testes
+## 6. Descrição dos itens (modelo de visão-linguagem)
+
+O YOLO-World diz *o que* e *onde* ("cadeira", nesta caixa). O modelo de
+visão-linguagem (VLM) olha cada recorte e preenche a **ficha do item**: nome,
+categoria, marca, modelo, cor, estado, texto visível (etiquetas, números de
+série) e se o recorte realmente é o que o detector disse (`confere`), o que
+ajuda a descartar falsos positivos.
+
+### 6.1 Modelo escolhido: Qwen3-VL-4B em 4 bits
+
+Para uma **GPU de 6 GB**, o padrão é o
+[`Qwen/Qwen3-VL-4B-Instruct`](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct)
+quantizado em 4 bits (NF4, via bitsandbytes):
+
+- ~3 GB de VRAM, deixando espaço para o YOLO-World na mesma placa;
+- bom em ler texto (OCR) e em responder em português;
+- segue bem a instrução de responder em JSON.
+
+Alternativas, trocando só `INVENTARIO_VLM_MODEL`:
+
+| Modelo | VRAM aprox. (4 bits) | Quando usar |
+|---|---|---|
+| `Qwen/Qwen3-VL-4B-Instruct` | ~3 GB | **padrão** |
+| `Qwen/Qwen3-VL-2B-Instruct` | ~1,5 GB | se faltar memória ou precisar de mais velocidade (lê texto pior) |
+| `Qwen/Qwen3.5-4B` | ~3 GB | mais novo e melhor em raciocínio nos benchmarks; não testado neste projeto, vale comparar |
+
+> Os números de VRAM são estimativas; o log mostra o uso real
+> (`VLM carregado: X GB de VRAM`).
+
+### 6.2 Instalar
+
+```bash
+uv sync --extra visao --extra vlm
+#   ou:  pip install -r requirements-vlm.txt
+```
+
+Na primeira execução o modelo (~8 GB de download, ~3 GB na GPU depois de
+quantizado) vai para `~/.cache/huggingface`. Para outro disco, use
+`INVENTARIO_VLM_CACHE_DIR`.
+
+### 6.3 Como usar: em lote (recomendado para 6 GB) ou ao vivo
+
+O VLM leva alguns segundos por item. Por isso há dois modos.
+
+**Em lote (recomendado):** filme com só o YOLO-World ao vivo (resposta rápida no
+celular) e descreva tudo depois:
+
+```bash
+# .env
+INVENTARIO_PROCESSORS=inventario_visual.vision:YoloWorldProcessor
+
+# depois de filmar:
+uv run inventario-descrever data/keyframes/20261017_143005_ab12cd
+```
+
+O lote pode ser interrompido (Ctrl+C) e rodado de novo: ele **retoma** de onde
+parou. `--refazer` apaga as descrições e começa do zero (útil depois de mudar o
+prompt ou o modelo). Também aceita várias sessões de uma vez.
+
+**Ao vivo:** o VLM roda logo depois do YOLO-World, e o celular mostra os nomes
+dos itens (ex.: `#3: Monitor Dell; Cadeira (?)`; o `(?)` indica que o VLM
+discordou do detector):
+
+```bash
+INVENTARIO_PROCESSORS=inventario_visual.vision:YoloWorldProcessor,inventario_visual.vision:VlmProcessor
+```
+
+Funciona bem andando devagar. Se você gerar frames-chave mais rápido do que o
+VLM descreve, a fila enche e os frames mais antigos ficam sem descrição. Nesse
+caso, rode o `inventario-descrever` depois na mesma sessão: ele completa só o
+que faltou.
+
+### 6.4 O que é gerado
+
+```
+data/keyframes/<sessão>/
+  descriptions.jsonl     # registro completo, incluindo a resposta bruta do modelo
+  inventario.csv         # uma linha por item: abre direto no LibreOffice/Excel
+```
+
+Colunas do `inventario.csv`: `frame`, `indice_frame`, `capturado_em`,
+`rotulo_detector`, `confianca_detector`, `confere`, `nome`, `categoria`,
+`marca`, `modelo`, `cor`, `estado`, `texto_visivel`, `descricao`, `erro`,
+`recorte`, `bbox`.
+
+Se o modelo responder algo que não é JSON, a linha é gravada mesmo assim, com
+a coluna `erro` preenchida e a resposta bruta no `descriptions.jsonl`.
+
+### 6.5 Parâmetros (`INVENTARIO_VLM_*`)
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `MODEL` | `Qwen/Qwen3-VL-4B-Instruct` | qualquer modelo compatível com `AutoModelForImageTextToText` |
+| `QUANTIZATION` | `4bit` | `4bit`, `8bit` ou `none` (só GPU; na CPU roda sem quantizar) |
+| `DEVICE` | `auto` | `auto`, `cuda:0`, `cpu` |
+| `MAX_SIDE` | `768` | lado maior do recorte enviado: ↑ lê textos menores, usa mais VRAM |
+| `MIN_CROP_PX` | `40` | ignora recortes menores que isso |
+| `MAX_ITEMS` | `6` | máximo de itens descritos por frame-chave (maior confiança primeiro) |
+| `MAX_NEW_TOKENS` | `200` | tamanho máximo da resposta |
+| `PROMPT_FILE` | (vazio) | prompt próprio; use `{rotulo}` onde entra o rótulo detectado |
+| `CACHE_DIR` | (vazio) | pasta dos pesos (padrão: `~/.cache/huggingface`) |
+
+### 6.6 Se faltar memória na GPU (CUDA out of memory)
+
+Em ordem, do que menos afeta a qualidade para o que mais afeta:
+
+1. Use o **modo em lote**: o VLM roda sozinho, sem disputar a GPU com o vídeo.
+2. `INVENTARIO_VLM_MAX_SIDE=512`.
+3. `INVENTARIO_YOLO_MODEL=yolov8m-worldv2.pt` (detector menor).
+4. `INVENTARIO_VLM_MODEL=Qwen/Qwen3-VL-2B-Instruct`.
+
+Feche outros programas que usam a GPU (navegador com aceleração, jogos) e
+confira o consumo com `nvidia-smi`.
+
+---
+
+## 7. Testes
 
 ```bash
 uv run pytest
@@ -490,13 +609,14 @@ duplicatas, intervalo mínimo, amostragem, vídeo MJPG gravado em disco, o
 pipeline de processadores, a gravação com timestamp, as rotas HTTP e um teste
 **ponta a ponta com WebRTC real** (cliente aiortc enviando vídeo ao servidor).
 
-Os testes do YOLO-World usam um detector falso, então rodam sem PyTorch. Com o
-extra `visao` instalado, um teste adicional roda o modelo real (`yolov8s`) na
-imagem de exemplo do ultralytics; para rodar só ele: `uv run pytest -m visao`.
+Os testes do YOLO-World e do VLM usam modelos falsos, então rodam sem PyTorch.
+Com o extra `visao` instalado, um teste adicional roda o YOLO-World real
+(`yolov8s`) na imagem de exemplo do ultralytics; para rodar só ele:
+`uv run pytest -m visao`.
 
 ---
 
-## 7. Solução de problemas
+## 8. Solução de problemas
 
 | Sintoma | Causa provável / solução |
 |---|---|
@@ -511,6 +631,9 @@ imagem de exemplo do ultralytics; para rodar só ele: `uv run pytest -m visao`.
 | Log mostra `dispositivo=cpu` tendo GPU | Confira `nvidia-smi` e `uv run python -c "import torch; print(torch.cuda.is_available())"`. |
 | Detecta objetos errados / demais | Aumente `INVENTARIO_YOLO_CONF`, enxugue `config/classes.txt`, use prompts mais específicos. |
 | Não detecta objetos pequenos | Aproxime a câmera ou use `INVENTARIO_YOLO_IMGSZ=1280`. |
+| `CUDA out of memory` | Veja a seção 6.6. |
+| `inventario.csv` com muitos `erro` | O modelo não respondeu em JSON: confira o campo `raw` no `descriptions.jsonl`; aumente `INVENTARIO_VLM_MAX_NEW_TOKENS` se a resposta estiver cortada. |
+| Marca/modelo vazios | O VLM só preenche o que consegue ler: aproxime a câmera da etiqueta ou aumente `INVENTARIO_VLM_MAX_SIDE`. |
 | Imagem com resolução baixa | O navegador reduz a resolução quando a rede está ruim; aproxime-se do roteador (5 GHz ajuda). |
 
 ---

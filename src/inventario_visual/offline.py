@@ -67,19 +67,20 @@ def process_video(
                         len(times),
                         {"video_time_s": round(ts, 3), "sharpness": km.sharpness if km else None},
                     ).path
+                # O mesmo Keyframe passa por todos: cada processador enxerga o que
+                # os anteriores deixaram em `extras` (ex.: detecções -> VLM).
+                keyframe = Keyframe(
+                    session_id=output_dir.name if output_dir else video_path.stem,
+                    index=len(times),
+                    captured_at=captured_at,
+                    image=result.keyframe_image,
+                    path=path,
+                    sharpness=km.sharpness if km else 0.0,
+                    motion=km.motion if km else None,
+                    novelty=result.novelty,
+                )
                 for proc in processors or []:
-                    proc.process(
-                        Keyframe(
-                            session_id=output_dir.name if output_dir else video_path.stem,
-                            index=len(times),
-                            captured_at=captured_at,
-                            image=result.keyframe_image,
-                            path=path,
-                            sharpness=km.sharpness if km else 0.0,
-                            motion=km.motion if km else None,
-                            novelty=result.novelty,
-                        )
-                    )
+                    proc.process(keyframe)
     finally:
         cap.release()
     return times

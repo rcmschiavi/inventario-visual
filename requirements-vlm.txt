@@ -1,0 +1,7 @@
+# Descrição dos itens com VLM. Alternativa ao `uv sync --extra visao --extra vlm`:
+#   pip install -r requirements-vlm.txt
+-r requirements-visao.txt
+transformers>=4.57
+accelerate>=1.0
+bitsandbytes>=0.45
+pillow>=10

@@ -10,6 +10,7 @@ import pytest
 
 from inventario_visual.keyframes import KeyframeSelectorConfig
 from inventario_visual.offline import process_video
+from inventario_visual.processors import FrameProcessor, Keyframe
 
 from .conftest import cena_texturizada, deslocar
 
@@ -38,3 +39,24 @@ def test_processa_video_e_salva(video_sintetico: Path, tmp_path: Path):
     jpgs = sorted(saida.glob("*.jpg"))
     assert len(jpgs) == 2
     assert (saida / "keyframes.jsonl").read_text(encoding="utf-8").count("\n") == 2
+
+
+class Marca(FrameProcessor):
+    def process(self, keyframe: Keyframe) -> None:
+        keyframe.extras["marca"] = keyframe.index
+
+
+class Le(FrameProcessor):
+    def __init__(self) -> None:
+        self.vistos: list[object] = []
+
+    def process(self, keyframe: Keyframe) -> None:
+        self.vistos.append(keyframe.extras.get("marca"))
+
+
+def test_processadores_compartilham_o_mesmo_keyframe(video_sintetico: Path, tmp_path: Path):
+    """O segundo processador enxerga o que o primeiro deixou em extras (YOLO -> VLM)."""
+    cfg = KeyframeSelectorConfig(sample_fps=5, analysis_width=320, min_keyframe_interval_s=0.5)
+    le = Le()
+    process_video(video_sintetico, cfg, tmp_path / "saida", processors=[Marca(), le])
+    assert le.vistos == [1, 2]
