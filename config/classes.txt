@@ -17,11 +17,25 @@ teclado: keyboard
 mouse: computer mouse
 impressora: printer
 roteador: wifi router
-celular: cell phone
+celular: cell phone, smartphone
 tablet: tablet computer
-fone de ouvido: headphones
+webcam: webcam
+pen drive: usb flash drive
+hd externo: external hard drive
+hub usb: usb hub
+power bank: power bank
 cabo: cable
-carregador: power adapter
+carregador: power adapter, phone charger
+
+# Áudio e acessórios pequenos
+# (itens pequenos: aproxime a câmera; INVENTARIO_YOLO_IMGSZ=1280 também ajuda)
+fone de ouvido: headphones, headset
+fone intra-auricular: wireless earbuds, earbuds, in-ear earphones
+estojo de fones: earbuds charging case, earphone case
+microfone: microphone, desk microphone, condenser microphone
+controle remoto: remote control, tv remote
+controle de videogame: game controller, gamepad
+relógio inteligente: smartwatch
 
 # Mobiliário
 cadeira: chair, office chair
@@ -38,7 +52,11 @@ geladeira: refrigerator
 micro-ondas: microwave oven
 cafeteira: coffee maker
 projetor: projector
-caixa de som: speaker
+caixa de som: speaker, bluetooth speaker
+console de videogame: game console
+câmera fotográfica: camera
+luminária: desk lamp
+relógio: clock, wall clock
 
 # Ferramentas
 furadeira: power drill, cordless drill
@@ -52,6 +70,11 @@ trena: tape measure
 caixa de ferramentas: toolbox
 escada: ladder
 extensão elétrica: power strip, extension cord
+
+# Papelaria
+grampeador: stapler
+calculadora: calculator
+tesoura: scissors
 
 # Embalagens e diversos
 caixa: cardboard box, box

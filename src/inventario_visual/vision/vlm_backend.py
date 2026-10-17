@@ -23,7 +23,7 @@ Quantization = Literal["4bit", "8bit", "none"]
 
 
 class Describer(Protocol):
-    def describe(self, image: ImageRGB, prompt: str) -> str: ...
+    def describe(self, image: ImageRGB, prompt: str, max_new_tokens: int | None = None) -> str: ...
 
 
 class TransformersVlm:
@@ -83,7 +83,7 @@ class TransformersVlm:
         if cuda:
             logger.info("VLM carregado: %.1f GB de VRAM", torch.cuda.memory_allocated() / 1e9)
 
-    def describe(self, image: ImageRGB, prompt: str) -> str:
+    def describe(self, image: ImageRGB, prompt: str, max_new_tokens: int | None = None) -> str:
         from PIL import Image
 
         messages = [
@@ -106,6 +106,8 @@ class TransformersVlm:
             enable_thinking=False,
         ).to(self.model.device)
         with self._torch.inference_mode():
-            out = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False)
+            out = self.model.generate(
+                **inputs, max_new_tokens=max_new_tokens or self.max_new_tokens, do_sample=False
+            )
         generated = out[:, inputs["input_ids"].shape[1] :]
         return str(self.processor.batch_decode(generated, skip_special_tokens=True)[0]).strip()

@@ -100,14 +100,19 @@ def test_campos_vazios_no_env(monkeypatch: pytest.MonkeyPatch):
 class VlmFalso:
     """Responde uma ficha fixa conforme o rótulo que aparece no prompt."""
 
-    def __init__(self, falhar_em: str | None = None) -> None:
+    def __init__(self, falhar_em: str | None = None, resposta_varredura: str = "[]") -> None:
         self.chamadas: list[tuple[tuple[int, ...], str]] = []
         self.falhar_em = falhar_em
+        self.resposta_varredura = resposta_varredura
+        self.max_tokens_varredura: int | None = None
 
-    def describe(self, image: np.ndarray, prompt: str) -> str:
+    def describe(self, image: np.ndarray, prompt: str, max_new_tokens: int | None = None) -> str:
         self.chamadas.append((image.shape, prompt))
         if self.falhar_em and f'"{self.falhar_em}"' in prompt:
             raise RuntimeError("CUDA out of memory")
+        if "Liste os objetos" in prompt:  # varredura complementar
+            self.max_tokens_varredura = max_new_tokens
+            return self.resposta_varredura
         if '"monitor"' in prompt:
             return '{"confere": true, "nome": "Monitor", "marca": "Dell", "texto_visivel": "P2419H"}'
         return '```json\n{"confere": false, "nome": "Banqueta", "categoria": "mobiliário"}\n```'
@@ -127,10 +132,13 @@ def _sessao(tmp_path: Path) -> tuple[Path, np.ndarray]:
     return sessao, img
 
 
+SO_DETECTOR = {"_env_file": None, "complement": False}
+
+
 def test_processador_ao_vivo(tmp_path: Path):
     sessao, img = _sessao(tmp_path)
     vlm = VlmFalso()
-    proc = VlmProcessor(VlmSettings(_env_file=None), vlm)
+    proc = VlmProcessor(VlmSettings(**SO_DETECTOR), vlm)
     proc.setup()
     eventos: list[dict[str, Any]] = []
     kf = Keyframe("s", 3, datetime(2026, 10, 17, tzinfo=UTC), img, sessao / "f.jpg", 200.0, 1.0, None,
@@ -155,6 +163,7 @@ def test_processador_ao_vivo(tmp_path: Path):
         ("monitor", "Monitor", "True"),
         ("cadeira", "Banqueta", "False"),
     ]
+    assert {r["origem"] for r in rows} == {"detector"}
     assert rows[1]["categoria"] == "mobiliário"
 
     assert eventos == [{"type": "descriptions", "index": 3, "itens": ["Monitor Dell", "Banqueta (?)"]}]
@@ -163,7 +172,7 @@ def test_processador_ao_vivo(tmp_path: Path):
 
 def test_erro_do_modelo_nao_interrompe(tmp_path: Path):
     sessao, img = _sessao(tmp_path)
-    proc = VlmProcessor(VlmSettings(_env_file=None), VlmFalso(falhar_em="monitor"))
+    proc = VlmProcessor(VlmSettings(**SO_DETECTOR), VlmFalso(falhar_em="monitor"))
     proc.setup()
     kf = Keyframe("s", 1, datetime.now(UTC), img, sessao / "f.jpg", 1.0, None, None,
                   extras={"detections": DETS})
@@ -173,10 +182,10 @@ def test_erro_do_modelo_nao_interrompe(tmp_path: Path):
     assert recs[1]["item"]["nome"] == "Banqueta"
 
 
-def test_sem_yolo_antes_nao_faz_nada(tmp_path: Path):
+def test_sem_yolo_e_sem_varredura_nao_faz_nada(tmp_path: Path):
     sessao, img = _sessao(tmp_path)
     vlm = VlmFalso()
-    proc = VlmProcessor(VlmSettings(_env_file=None), vlm)
+    proc = VlmProcessor(VlmSettings(**SO_DETECTOR), vlm)
     proc.setup()
     proc.process(Keyframe("s", 1, datetime.now(UTC), img, sessao / "f.jpg", 1.0, None, None))
     assert vlm.chamadas == [] and not (sessao / "descriptions.jsonl").exists()
@@ -186,7 +195,7 @@ def test_prompt_personalizado(tmp_path: Path):
     arq = tmp_path / "prompt.txt"
     arq.write_text("Descreva o {rotulo} em JSON.", encoding="utf-8")
     vlm = VlmFalso()
-    core = ItemDescriber(VlmSettings(_env_file=None, prompt_file=arq), vlm)
+    core = ItemDescriber(VlmSettings(**SO_DETECTOR, prompt_file=arq), vlm)
     core.load()
     sessao, img = _sessao(tmp_path)
     from inventario_visual.vision.vlm import DescriptionWriter
@@ -208,7 +217,7 @@ def test_lote_descreve_retoma_e_refaz(tmp_path: Path):
     (sessao / "detections.jsonl").write_text(json.dumps(linha) + "\n" + json.dumps(vazio) + "\n")
 
     vlm = VlmFalso()
-    core = ItemDescriber(VlmSettings(_env_file=None), vlm)
+    core = ItemDescriber(VlmSettings(**SO_DETECTOR), vlm)
     core.load()
     assert describe_session(sessao, core) == 2
     assert describe_session(sessao, core) == 0  # retoma: nada pendente
@@ -222,3 +231,116 @@ def test_lote_descreve_retoma_e_refaz(tmp_path: Path):
 def test_lote_sem_deteccoes(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         describe_session(tmp_path, ItemDescriber(VlmSettings(_env_file=None), VlmFalso()))
+
+
+# --------------------------------------------------------------------------- #
+# Varredura complementar (itens fora do vocabulário do detector)
+# --------------------------------------------------------------------------- #
+
+LISTA = """Aqui está:
+```json
+[
+  {"nome": "Microfone condensador", "categoria": "áudio", "quantidade": 1, "marca": "HyperX",
+   "modelo": null, "cor": "preto", "estado": "bom", "texto_visivel": "HyperX",
+   "descricao": "Microfone de mesa à esquerda do teclado."},
+  {"nome": "Fones intra-auriculares no estojo", "categoria": "áudio", "quantidade": "1 unidade",
+   "marca": null, "cor": "branco", "descricao": "Estojo de carregamento aberto."},
+  {"nome": "Controle remoto", "categoria": "eletrônicos", "quantidade": 2, "cor": "preto"},
+  {"categoria": "sem nome -> descartado"}
+]
+```"""
+
+
+def test_parse_lista_da_varredura():
+    from inventario_visual.vision.vlm import parse_item_list
+
+    itens, erro = parse_item_list(LISTA)
+    assert erro is None
+    assert [i.nome for i in itens] == [
+        "Microfone condensador",
+        "Fones intra-auriculares no estojo",
+        "Controle remoto",
+    ]
+    assert [i.quantidade for i in itens] == [1, 1, 2]
+    assert itens[0].marca == "HyperX" and itens[1].marca is None
+    assert parse_item_list("[]") == ([], None)
+    # Formato alternativo: objeto com a lista dentro.
+    assert [i.nome for i in parse_item_list('{"itens": [{"nome": "Mouse"}]}')[0]] == ["Mouse"]
+    assert parse_item_list("não há itens")[1] == "resposta sem JSON"
+
+
+def test_prompt_informa_o_que_o_detector_ja_encontrou():
+    from inventario_visual.vision.vlm import already_cataloged_text
+
+    assert already_cataloged_text([]) == ""
+    texto = already_cataloged_text(["teclado", "computador", "teclado"])
+    assert "teclado (2), computador" in texto and "NÃO os repita" in texto
+
+
+def test_varredura_complementa_o_detector(tmp_path: Path):
+    sessao, img = _sessao(tmp_path)
+    vlm = VlmFalso(resposta_varredura=LISTA)
+    proc = VlmProcessor(VlmSettings(_env_file=None, complement_max_side=320), vlm)
+    proc.setup()
+    eventos: list[dict[str, Any]] = []
+    kf = Keyframe("s", 1, datetime.now(UTC), img, sessao / "f.jpg", 1.0, None, None,
+                  extras={"detections": DETS}, notify=eventos.append)
+    proc.process(kf)
+
+    # 2 recortes do detector + 1 chamada com o frame inteiro (reduzido para 320 px).
+    assert len(vlm.chamadas) == 3
+    forma, prompt = vlm.chamadas[2]
+    assert forma == (240, 320, 3)
+    assert "monitor, cadeira" in prompt and "{ja_catalogados}" not in prompt
+    assert vlm.max_tokens_varredura == 700
+
+    with (sessao / "inventario.csv").open(encoding="utf-8-sig") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [r["origem"] for r in rows] == ["detector", "detector", "frame", "frame", "frame"]
+    assert rows[2]["nome"] == "Microfone condensador" and rows[2]["rotulo_detector"] == ""
+    assert rows[4]["quantidade"] == "2"
+    assert eventos[0]["itens"][2:] == ["Microfone condensador HyperX", "Fones intra-auriculares no estojo",
+                                      "2× Controle remoto"]
+
+
+def test_varredura_sem_yolo(tmp_path: Path):
+    """Sem o detector, o VLM sozinho cataloga o frame inteiro."""
+    sessao, img = _sessao(tmp_path)
+    vlm = VlmFalso(resposta_varredura=LISTA)
+    proc = VlmProcessor(VlmSettings(_env_file=None), vlm)
+    proc.setup()
+    proc.process(Keyframe("s", 1, datetime.now(UTC), img, sessao / "f.jpg", 1.0, None, None))
+    assert len(vlm.chamadas) == 1 and "JÁ foram catalogados" not in vlm.chamadas[0][1]
+    assert (sessao / "inventario.csv").read_text(encoding="utf-8-sig").count("\n") == 4  # cabeçalho + 3
+
+
+def test_varredura_com_resposta_invalida_registra_erro(tmp_path: Path):
+    sessao, img = _sessao(tmp_path)
+    proc = VlmProcessor(VlmSettings(_env_file=None), VlmFalso(resposta_varredura="não sei"))
+    proc.setup()
+    proc.process(Keyframe("s", 1, datetime.now(UTC), img, sessao / "f.jpg", 1.0, None, None))
+    with (sessao / "inventario.csv").open(encoding="utf-8-sig") as fh:
+        (row,) = list(csv.DictReader(fh))
+    assert row["origem"] == "frame" and row["erro"] == "resposta sem JSON"
+
+
+def test_lote_com_varredura_retoma_inclusive_frames_sem_deteccoes(tmp_path: Path):
+    sessao, _ = _sessao(tmp_path)
+    cv2.imwrite(str(sessao / "g.jpg"), cena_texturizada(2, h=480, w=640))
+    linhas = [
+        {"index": 1, "file": "f.jpg", "detections": [
+            {"label": "monitor", "prompt": "computer monitor", "confidence": 0.8,
+             "bbox": [10, 20, 210, 170], "crop_file": None}]},
+        {"index": 2, "file": "g.jpg", "detections": []},  # detector não achou nada
+    ]
+    (sessao / "detections.jsonl").write_text("\n".join(json.dumps(x) for x in linhas) + "\n")
+    vlm = VlmFalso(resposta_varredura='[{"nome": "Controle remoto"}]')
+    core = ItemDescriber(VlmSettings(_env_file=None), vlm)
+    core.load()
+    # f.jpg: 1 recorte + 1 item da varredura; g.jpg: 1 item da varredura.
+    assert describe_session(sessao, core) == 3
+    assert len(vlm.chamadas) == 3
+    # Retoma sem repetir nada, inclusive varreduras que não acharam itens.
+    vlm.resposta_varredura = "[]"
+    assert describe_session(sessao, core) == 0
+    assert len(vlm.chamadas) == 3

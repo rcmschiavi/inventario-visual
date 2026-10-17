@@ -486,6 +486,17 @@ categoria, marca, modelo, cor, estado, texto visível (etiquetas, números de
 série) e se o recorte realmente é o que o detector disse (`confere`), o que
 ajuda a descartar falsos positivos.
 
+Além disso, a **varredura complementar** (ligada por padrão) envia o frame
+inteiro ao VLM e pede a lista dos itens que o detector **não** encontrou. É ela
+que cobre o que não está em `config/classes.txt`: o microfone, o estojo de
+fones, o controle remoto e assim por diante. O VLM recebe a lista do que o
+detector já achou naquele frame, para não repetir.
+
+| Origem (coluna `origem`) | Como foi encontrado | Tem recorte/caixa? |
+|---|---|---|
+| `detector` | YOLO-World + ficha do VLM sobre o recorte | sim |
+| `frame` | varredura complementar do frame inteiro | não (a `descricao` diz onde está) |
+
 ### 6.1 Modelo escolhido: Qwen3-VL-4B em 4 bits
 
 Para uma **GPU de 6 GB**, o padrão é o
@@ -534,7 +545,7 @@ uv run inventario-descrever data/keyframes/20261017_143005_ab12cd
 ```
 
 O lote pode ser interrompido (Ctrl+C) e rodado de novo: ele **retoma** de onde
-parou. `--refazer` apaga as descrições e começa do zero (útil depois de mudar o
+parou. `--sem-varredura` desliga a varredura complementar. `--refazer` apaga as descrições e começa do zero (útil depois de mudar o
 prompt ou o modelo). Também aceita várias sessões de uma vez.
 
 **Ao vivo:** o VLM roda logo depois do YOLO-World, e o celular mostra os nomes
@@ -558,10 +569,10 @@ data/keyframes/<sessão>/
   inventario.csv         # uma linha por item: abre direto no LibreOffice/Excel
 ```
 
-Colunas do `inventario.csv`: `frame`, `indice_frame`, `capturado_em`,
+Colunas do `inventario.csv`: `frame`, `indice_frame`, `capturado_em`, `origem`,
 `rotulo_detector`, `confianca_detector`, `confere`, `nome`, `categoria`,
-`marca`, `modelo`, `cor`, `estado`, `texto_visivel`, `descricao`, `erro`,
-`recorte`, `bbox`.
+`marca`, `modelo`, `cor`, `estado`, `texto_visivel`, `quantidade`, `descricao`,
+`erro`, `recorte`, `bbox`.
 
 Se o modelo responder algo que não é JSON, a linha é gravada mesmo assim, com
 a coluna `erro` preenchida e a resposta bruta no `descriptions.jsonl`.
@@ -578,6 +589,10 @@ a coluna `erro` preenchida e a resposta bruta no `descriptions.jsonl`.
 | `MAX_ITEMS` | `6` | máximo de itens descritos por frame-chave (maior confiança primeiro) |
 | `MAX_NEW_TOKENS` | `200` | tamanho máximo da resposta |
 | `PROMPT_FILE` | (vazio) | prompt próprio; use `{rotulo}` onde entra o rótulo detectado |
+| `COMPLEMENT` | `true` | varredura complementar do frame inteiro |
+| `COMPLEMENT_MAX_SIDE` | `1280` | resolução do frame na varredura: ↑ enxerga itens menores, usa mais VRAM |
+| `COMPLEMENT_MAX_NEW_TOKENS` | `700` | tamanho máximo da lista (aumente se ela vier cortada) |
+| `COMPLEMENT_PROMPT_FILE` | (vazio) | prompt próprio da varredura; use `{ja_catalogados}` |
 | `CACHE_DIR` | (vazio) | pasta dos pesos (padrão: `~/.cache/huggingface`) |
 
 ### 6.6 Se faltar memória na GPU (CUDA out of memory)
@@ -585,7 +600,7 @@ a coluna `erro` preenchida e a resposta bruta no `descriptions.jsonl`.
 Em ordem, do que menos afeta a qualidade para o que mais afeta:
 
 1. Use o **modo em lote**: o VLM roda sozinho, sem disputar a GPU com o vídeo.
-2. `INVENTARIO_VLM_MAX_SIDE=512`.
+2. `INVENTARIO_VLM_COMPLEMENT_MAX_SIDE=960` e `INVENTARIO_VLM_MAX_SIDE=512`.
 3. `INVENTARIO_YOLO_MODEL=yolov8m-worldv2.pt` (detector menor).
 4. `INVENTARIO_VLM_MODEL=Qwen/Qwen3-VL-2B-Instruct`.
 
@@ -633,6 +648,8 @@ Com o extra `visao` instalado, um teste adicional roda o YOLO-World real
 | Não detecta objetos pequenos | Aproxime a câmera ou use `INVENTARIO_YOLO_IMGSZ=1280`. |
 | `CUDA out of memory` | Veja a seção 6.6. |
 | `inventario.csv` com muitos `erro` | O modelo não respondeu em JSON: confira o campo `raw` no `descriptions.jsonl`; aumente `INVENTARIO_VLM_MAX_NEW_TOKENS` se a resposta estiver cortada. |
+| Item não aparece no inventário | Confira `annotated/` (o detector achou?) e a varredura (linhas com `origem` = `frame`). Itens pequenos: aproxime a câmera; `INVENTARIO_YOLO_IMGSZ=1280`. Itens recorrentes: adicione-os em `config/classes.txt`, que dá recorte e ficha mais precisa. |
+| O mesmo item aparece mais de uma vez | Ele foi visto em mais de um frame-chave; juntar duplicatas entre frames ainda não é automático. |
 | Marca/modelo vazios | O VLM só preenche o que consegue ler: aproxime a câmera da etiqueta ou aumente `INVENTARIO_VLM_MAX_SIDE`. |
 | Imagem com resolução baixa | O navegador reduz a resolução quando a rede está ruim; aproxime-se do roteador (5 GHz ajuda). |
 
