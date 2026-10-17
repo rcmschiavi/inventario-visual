@@ -12,17 +12,17 @@ uma ficha para cada um (nome, marca, modelo, estado, texto visível), gerando um
 ```
  Celular (Chrome/Safari)                       PC com Linux (este projeto)
 ┌──────────────────────┐   HTTPS (página+SDP)  ┌──────────────────────────────────────────┐
-│ getUserMedia         │ ───────────────────▶  │ FastAPI  ── /api/offer ──▶ aiortc         │
-│ (câmera traseira)    │                       │                              │            │
-│ RTCPeerConnection    │ ══ WebRTC (vídeo) ══▶ │  amostragem ▶ KeyframeSelector            │
-│ DataChannel ◀────────┼── eventos/status ──── │   (movimento + nitidez + novidade)        │
-└──────────────────────┘                       │          │                                │
-                                               │          ▼                                │
-                                               │  data/keyframes/<sessão>/*.jpg + .jsonl   │
-                                               │          │                                │
-                                               │          ▼                                │
-                                               │  ProcessorPipeline ▶ FrameProcessor(s)    │
-                                               │  (YOLO-World -> VLM -> inventario.csv)    │
+│ getUserMedia         │ ───────────────────▶  │ FastAPI  ── /api/offer ──▶ aiortc        │
+│ (câmera traseira)    │                       │                              │           │
+│ RTCPeerConnection    │ ══ WebRTC (vídeo) ══▶ │  amostragem ▶ KeyframeSelector           │
+│ DataChannel ◀────────┼── eventos/status ──── │   (movimento + nitidez + novidade)       │
+└──────────────────────┘                       │          │                               │
+                                               │          ▼                               │
+                                               │  data/keyframes/<sessão>/*.jpg + .jsonl  │
+                                               │          │                               │
+                                               │          ▼                               │
+                                               │  ProcessorPipeline ▶ FrameProcessor(s)   │
+                                               │  (YOLO-World -> VLM -> inventario.csv)   │
                                                └──────────────────────────────────────────┘
 ```
 
